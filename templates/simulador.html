@@ -1,0 +1,435 @@
+{% extends "base.html" %}
+
+{% block title %}Simulador — 52Sec Gemelo Digital{% endblock %}
+
+{% block head_extra %}
+  <!-- Preconnect CDNs del simulador -->
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="dns-prefetch" href="https://basemaps.cartocdn.com">
+  <!-- Estilos de Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <!-- Todos los scripts con defer para no bloquear el render (se ejecutan en orden) -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js" defer></script>
+  <script src="{{ url_for('static', filename='js/simulador.js') }}?v=2000000011" defer></script>
+  <script src="{{ url_for('static', filename='js/socketClient.js') }}?v=2000000011" defer></script>
+{% endblock %}
+
+{% block content %}
+<div class="sim-container">
+  <!-- Rejilla principal del tablero -->
+  <div class="sim-dashboard-grid">
+    <!-- Columna izquierda: Telemetria y Controles -->
+    <div class="sim-col-left">
+      <!-- Metricas de telemetria -->
+      <div class="sim-panel telemetry-panel">
+        <div class="sim-panel-header">
+          <h2 class="sim-panel-title">Telemetría en Vivo</h2>
+        </div>
+        <div class="sim-metrics-grid">
+          <div class="sim-metric-card">
+            <div class="metric-label">Velocidad</div>
+            <div id="velocidad-valor" class="metric-value">0</div>
+            <div class="metric-unit">km/h</div>
+            <div class="metric-status">Actual</div>
+          </div>
+
+          <div class="sim-metric-card">
+            <div class="metric-label">Combustible</div>
+            <div id="combustible-tiempo-real" class="metric-value">--</div>
+            <div class="metric-unit">%</div>
+            <div class="metric-status">Reserva</div>
+          </div>
+
+          <div class="sim-metric-card">
+            <div class="metric-label">Temp. Motor</div>
+            <div id="temperatura-tiempo-real" class="metric-value">--</div>
+            <div class="metric-unit">°C</div>
+            <div id="temperatura-alerta" class="metric-status">Normal</div>
+          </div>
+
+          <div class="sim-metric-card">
+            <div class="metric-label">Kilometraje</div>
+            <div id="kilometraje-valor" class="metric-value">--</div>
+            <div class="metric-unit">km</div>
+            <div class="metric-status">Total</div>
+          </div>
+
+          <div class="sim-metric-card">
+            <div class="metric-label">Aceite Motor</div>
+            <div id="aceite-valor" class="metric-value">--</div>
+            <div class="metric-unit">%</div>
+            <div id="aceite-alerta" class="metric-status">Normal</div>
+          </div>
+
+          <div class="sim-metric-card">
+            <div class="metric-label">Distancia</div>
+            <div id="distancia-recorrida" class="metric-value">0.0</div>
+            <div class="metric-unit">km</div>
+            <div class="metric-status">Recorrida</div>
+          </div>
+        </div>
+
+        <!-- Fila de informacion adicional -->
+        <div class="sim-info-row">
+          <div class="sim-info-item">
+            <label>Coordenadas GPS</label>
+            <div id="gps-coordenadas" class="info-value">40.4168, -3.7038</div>
+          </div>
+          <div class="sim-info-item">
+            <label>Escenario Activo</label>
+            <div id="escenario-nombre" class="info-value">Sin Escenario</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mapa de Madrid en tiempo real -->
+      <div class="sim-panel map-panel">
+        <div class="sim-panel-header">
+          <h2 class="sim-panel-title">Ubicación en Tiempo Real</h2>
+          <span class="badge badge-blue">Madrid, España</span>
+        </div>
+        <div id="mapa-vehiculo" class="sim-map-container"></div>
+      </div>
+
+      <!-- Condiciones del Entorno (debajo del mapa, compacto) -->
+      <div id="entorno-section" class="sim-panel" style="display:none; padding: 12px 16px; min-height: 44px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; height: 100%;">
+          <span id="clima-texto" style="font-size: 0.85rem;">--</span>
+          <span id="temperatura-texto" style="font-size: 0.85rem; text-align: center;">--</span>
+          <span id="trafico-texto" style="font-size: 0.85rem; text-align: right;">--</span>
+        </div>
+        <div id="entorno-alertas" style="margin-top: 6px; font-size: 0.8rem;"></div>
+      </div>
+    </div>
+
+    <!-- Columna derecha: Entrada y Resultados -->
+    <div class="sim-col-right">
+      <!-- Tarjeta de entrada del escenario -->
+      <div class="sim-panel scenario-input-panel">
+        <div class="sim-panel-header">
+          <div>
+            <h2 class="sim-panel-title">Crear Escenario</h2>
+            <p class="sim-panel-subtitle">Describe el escenario táctico que deseas simular</p>
+          </div>
+          <span class="badge badge-green"><span class="dot pulse"></span> IA Activa</span>
+        </div>
+        
+        <form id="escenario-form" class="sim-form">
+          <div class="form-group">
+            <label for="escenario">Descripción del escenario</label>
+            <textarea id="escenario" name="escenario" rows="6" placeholder="Describe el escenario operativo que deseas simular en lenguaje natural. Por ejemplo: Acudir a una emergencia en la calle Gran Vía, hay un accidente de tráfico con heridos..." required></textarea>
+          </div>
+          <button type="submit" class="btn btn-primary btn-large">Analizar y Simular →</button>
+        </form>
+      </div>
+
+      <!-- Seccion de resultados (oculta al inicio) -->
+      <div id="resultados" style="display:none;">
+        <!-- Alertas Críticas (PRIMERO - Máxima Prioridad) -->
+        <div id="alertas-section" class="results-section"></div>
+
+        <!-- Panel de Viabilidad -->
+        <div id="viabilidad-box" class="sim-panel results-section"></div>
+
+        <!-- Análisis de Riesgos y Impacto en Recursos - 2 columnas -->
+        <div class="sim-panel-row">
+          <div class="sim-panel-half">
+            <div id="riesgos-section" class="sim-result-card results-section"></div>
+          </div>
+          <div class="sim-panel-half">
+            <div id="impacto-section" class="sim-result-card results-section"></div>
+          </div>
+        </div>
+
+        <!-- Plan de Acción -->
+        <div id="plan-section" class="sim-panel results-section"></div>
+
+        <!-- Estado Final Estimado -->
+        <div id="estado-final-section" class="sim-panel results-section"></div>
+
+        <!-- Botón para Iniciar Nuevo Escenario (movido al final) -->
+        <div class="results-section" style="margin-top: 40px;">
+          <button class="btn btn-primary btn-large" onclick="iniciarNuevoEscenario()" style="width: 100%;">
+            ↻ Terminar e Iniciar un Escenario Nuevo
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% block scripts %}
+<script>
+  // La simulacion corre en el servidor.
+  // El cliente solo renderiza el estado recibido via WebSocket.
+  // El servidor se usa para: analisis IA, simulacion vehiculo, rutas.
+
+  let nombreEscenarioActual = null;
+
+  // Inicializar cuando cargue la pagina
+  document.addEventListener('DOMContentLoaded', function() {
+    // 1. Inicializar mapa
+    simulador.inicializarMapa('mapa-vehiculo');
+    
+    // 2. Iniciar loop de renderizado (sin simulacion, solo visual)
+    simulador.iniciarLoop();
+  });
+
+  function iniciarNuevoEscenario() {
+    socketClient.enviarControl('terminar');
+    nombreEscenarioActual = null;
+    simulador.nombreEscenario = null;
+    document.getElementById('resultados').style.display = 'none';
+    document.querySelector('.scenario-input-panel').style.display = '';
+    document.querySelector('.scenario-input-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // Manejar submit del formulario de escenario
+  document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('escenario-form');
+    if (form) {
+      form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        const escenarioText = document.getElementById('escenario').value.trim();
+        if (!escenarioText) return;
+
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.textContent = 'Analizando con IA...';
+        submitBtn.disabled = true;
+
+        try {
+          // La posicion actual la tiene el servidor, pero enviamos la del
+          // renderizador por si el servidor aun no tiene una precisa
+          const posicionActual = {
+            lat: simulador.posObjetivo[0],
+            lng: simulador.posObjetivo[1]
+          };
+          
+          // Llamar al API - el servidor analiza con IA Y aplica el escenario
+          const response = await fetch('/api/simular', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              escenario: escenarioText,
+              posicion: posicionActual
+            })
+          });
+
+          if (!response.ok) throw new Error('Error en la respuesta');
+          
+          const data = await response.json();
+          
+          if (data.exito && data.analisis) {
+            // Mostrar datos del entorno
+            if (data.entorno) {
+              mostrarEntorno(data.entorno);
+            }
+            
+            // Mostrar resultados del analisis
+            mostrarResultados(data.analisis);
+            nombreEscenarioActual = data.analisis.nombre || 'Escenario';
+            simulador.setNombreEscenario(nombreEscenarioActual);
+            
+            // Si el servidor envio ruta, mostrarla en el mapa inmediatamente
+            if (data.ruta) {
+              simulador.actualizarRuta(data.ruta, true);  // forzarMostrar = true (es un escenario)
+            }
+            
+            // Mostrar controles
+            // Ocultar panel de entrada y mostrar resultados
+            document.querySelector('.scenario-input-panel').style.display = 'none';
+            document.getElementById('resultados').style.display = 'block';
+          } else {
+            alert('Error al analizar el escenario: ' + (data.error || 'Error desconocido'));
+          }
+        } catch (err) {
+          console.error('Error:', err);
+          alert('Error al comunicarse con el servidor: ' + err.message);
+        } finally {
+          submitBtn.textContent = originalText;
+          submitBtn.disabled = false;
+        }
+      });
+    }
+  });
+
+  function mostrarEntorno(entorno) {
+    const seccion = document.getElementById('entorno-section');
+    const climaEl = document.getElementById('clima-texto');
+    const temperaturaEl = document.getElementById('temperatura-texto');
+    const traficoEl = document.getElementById('trafico-texto');
+    const alertasEl = document.getElementById('entorno-alertas');
+    
+    if (!entorno) {
+      seccion.style.display = 'none';
+      return;
+    }
+    
+    seccion.style.display = 'block';
+    
+    // Clima y Temperatura (separados)
+    const clima = entorno.clima;
+    if (clima) {
+      const cond = clima.condicion || {};
+      const desc = cond.descripcion ? cond.descripcion.charAt(0).toUpperCase() + cond.descripcion.slice(1) : 'N/A';
+      const temp = clima.temperatura != null ? clima.temperatura : '--';
+      climaEl.innerHTML = `<strong>Clima:</strong> ${desc}`;
+      temperaturaEl.innerHTML = `<strong>Temperatura:</strong> ${temp}°C`;
+    }
+    
+    // Tráfico
+    const trafico = entorno.trafico;
+    if (trafico) {
+      const nivelMap = {
+        'libre': 'Libre',
+        'fluido': 'Fluido',
+        'moderado': 'Moderado',
+        'denso': 'Denso',
+        'muy_denso': 'Muy Denso',
+        'desconocido': 'Sin datos'
+      };
+      const nivelTexto = nivelMap[trafico.nivel] || trafico.nivel;
+      const velocidad = trafico.velocidad_actual_kmh || trafico.velocidad_promedio_kmh;
+      const velocidadStr = velocidad ? ` (${velocidad}km/h promedio)` : '';
+      traficoEl.innerHTML = `<strong>Tráfico:</strong> ${nivelTexto}${velocidadStr}`;
+    }
+    
+    // Alertas del entorno (compacto)
+    const alertas = entorno.alertas_entorno || [];
+    if (alertas.length > 0) {
+      alertasEl.innerHTML = alertas.map(a => 
+        `<span style="display:inline-block; padding: 2px 6px; margin: 2px; background: var(--warn-ghost); border-radius: 4px;">${a}</span>`
+      ).join('');
+    } else {
+      alertasEl.innerHTML = '';
+    }
+  }
+
+
+  function mostrarResultados(resultado) {
+    const analisis   = resultado.analisis_ia;
+
+    let viab = (analisis.viabilidad || 'arriesgado').toLowerCase().trim();
+    const viabilidadMap = {
+      'viable':          { color: 'var(--accent)',  bg: 'var(--accent-ghost)',  border: 'var(--accent-border)', icon: '✓', label: 'Viable' },
+      'condicionada':    { color: 'var(--warn)',    bg: 'var(--warn-ghost)',    border: 'rgba(243,156,18,0.3)', icon: '⚠', label: 'Viable con Precauciones' },
+      'arriesgado':      { color: 'var(--warn)',    bg: 'var(--warn-ghost)',    border: 'rgba(243,156,18,0.3)', icon: '⚠', label: 'Arriesgado' },
+      'no_recomendado':  { color: 'var(--danger)',  bg: 'var(--danger-ghost)',  border: 'rgba(231,76,60,0.35)', icon: '✕', label: 'No Recomendado' }
+    };
+    if (viab.includes('precaución') || viab.includes('precaucion') || viab.includes('condición') || viab.includes('condicion')) viab = 'condicionada';
+    const vc = viabilidadMap[viab] || viabilidadMap['arriesgado'];
+
+    document.getElementById('viabilidad-box').innerHTML = `
+      <div class="sim-panel-header">
+        <h2 class="sim-panel-title">Evaluación de Viabilidad</h2>
+      </div>
+      <div class="viability-content" style="background:${vc.bg};border:1px solid ${vc.border};border-radius:12px;">
+        <div class="viability-header">
+          <span class="viability-icon">${vc.icon}</span>
+          <span class="viability-label" style="color:${vc.color};">${vc.label}</span>
+        </div>
+        <p class="viability-text">${analisis.justificacion_viabilidad || ''}</p>
+      </div>`;
+
+    // Riesgos
+    if (analisis.analisis_riesgos && analisis.analisis_riesgos.length > 0) {
+      let html = '<div class="sim-panel-header"><h2 class="sim-panel-title">Análisis de Riesgos</h2></div>';
+      analisis.analisis_riesgos.forEach(r => {
+        html += `<div class="warning-box">⚠ ${r}</div>`;
+      });
+      document.getElementById('riesgos-section').innerHTML = html;
+    } else {
+      document.getElementById('riesgos-section').innerHTML = '<div class="sim-panel-header"><h2 class="sim-panel-title">Análisis de Riesgos</h2></div><p style="color:var(--text-muted);font-size:0.85rem;">Sin riesgos identificados.</p>';
+    }
+
+    // Impacto
+    const impacto = analisis.impacto_recursos;
+    let impHtml = '<div class="sim-panel-header"><h2 class="sim-panel-title">Impacto en Recursos</h2></div>';
+    impHtml += `
+      <div class="metrics-grid" style="margin-bottom:12px;">
+        <div class="metric-card"><div class="metric-label">Combustible Final</div><div class="metric-value">${impacto.combustible_estimado.toFixed(1)}</div><div class="metric-unit">%</div></div>
+        <div class="metric-card"><div class="metric-label">Tiempo Est.</div><div class="metric-value">${impacto.tiempo_estimado}</div><div class="metric-unit">min</div></div>
+        <div class="metric-card"><div class="metric-label">Temp. Máx.</div><div class="metric-value">${impacto.temperatura_esperada.toFixed(0)}</div><div class="metric-unit">°C</div></div>
+      </div>`;
+    const deg = impacto.desgaste_componentes || {};
+    const colorDesgaste = d => d === 'alto' ? 'var(--danger)' : d === 'medio' ? 'var(--warn)' : 'var(--accent)';
+    impHtml += `
+      <div style="padding-top:12px;border-top:1px solid var(--border);">
+        <p style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:10px;font-weight:600;">Desgaste de Componentes</p>
+        <div class="metrics-grid">
+          <div class="metric-card"><div class="metric-label">Frenos</div><div class="metric-value" style="color:${colorDesgaste(deg.frenos||'medio')};font-size:1rem;">${(deg.frenos||'medio').toUpperCase()}</div></div>
+          <div class="metric-card"><div class="metric-label">Motor</div><div class="metric-value" style="color:${colorDesgaste(deg.motor||'medio')};font-size:1rem;">${(deg.motor||'medio').toUpperCase()}</div></div>
+          <div class="metric-card"><div class="metric-label">Neumáticos</div><div class="metric-value" style="color:${colorDesgaste(deg.neumaticos||'medio')};font-size:1rem;">${(deg.neumaticos||'medio').toUpperCase()}</div></div>
+        </div>
+      </div>`;
+    document.getElementById('impacto-section').innerHTML = impHtml;
+
+    // Plan de acción
+    if (analisis.acciones_recomendadas && analisis.acciones_recomendadas.length > 0) {
+      let planHtml = '<div class="sim-panel-header"><h2 class="sim-panel-title">Plan de Acción Recomendado</h2></div>';
+      const priorColors = { alta: 'var(--danger)', media: 'var(--warn)', baja: 'var(--accent)' };
+      analisis.acciones_recomendadas.forEach(a => {
+        const prior = a.prioridad || 'media';
+        planHtml += `<div class="plan-item">
+          <span style="color:${priorColors[prior]}">${prior.toUpperCase()}</span>
+          <strong> • Paso ${a.paso}:</strong> ${a.accion}
+        </div>`;
+      });
+      document.getElementById('plan-section').innerHTML = planHtml;
+    }
+
+    // Alertas
+    let alertasHtml = '';
+    const formatearTexto = t => t.replace(/_/g,' ').split(' ').map(w => w.charAt(0).toUpperCase()+w.slice(1).toLowerCase()).join(' ');
+    if (analisis.requiere_apoyo) {
+      alertasHtml += '<div class="critical-box">⚠ Se Requiere Apoyo Adicional';
+      if (analisis.tipo_apoyo_necesario && analisis.tipo_apoyo_necesario.length > 0) {
+        alertasHtml += '<ul>';
+        analisis.tipo_apoyo_necesario.forEach(t => { alertasHtml += `<li>${formatearTexto(t)}</li>`; });
+        alertasHtml += '</ul>';
+      }
+      alertasHtml += '</div>';
+    }
+    if (analisis.alertas_criticas && analisis.alertas_criticas.length > 0) {
+      alertasHtml += '<div class="critical-box">⚠ Alertas Críticas<ul>';
+      analisis.alertas_criticas.forEach(a => { alertasHtml += `<li>${a}</li>`; });
+      alertasHtml += '</ul></div>';
+    }
+    if (alertasHtml) document.getElementById('alertas-section').innerHTML = alertasHtml;
+
+    // Estado final
+    const ef = analisis.estado_final_estimado;
+    const condicionMap = {
+      'óptimo':    { color: 'var(--accent)',  icon: '✓', label: 'Óptimo' },
+      'aceptable': { color: 'var(--accent)',  icon: '✓', label: 'Aceptable' },
+      'degradado': { color: 'var(--warn)',    icon: '⚠', label: 'Degradado' },
+      'crítico':   { color: 'var(--danger)',  icon: '✕', label: 'Crítico' }
+    };
+    let cond = (ef.condicion_vehiculo || 'aceptable').toLowerCase().trim();
+    if (cond.includes('degradad')) cond = 'degradado';
+    if (cond.includes('crític'))   cond = 'crítico';
+    const cc = condicionMap[cond] || condicionMap['aceptable'];
+
+    document.getElementById('estado-final-section').innerHTML = `
+      <div class="sim-panel-header"><h2 class="sim-panel-title">Estado Final Estimado</h2></div>
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-label">Combustible Restante</div>
+          <div class="metric-value">${ef.combustible.toFixed(1)}</div>
+          <div class="metric-unit">%</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Condición Vehículo</div>
+          <div class="metric-value" style="color:${cc.color};">${cc.icon}</div>
+          <div class="metric-unit">${cc.label}</div>
+        </div>
+      </div>`;
+  }
+
+</script>
+{% endblock %}
+{% endblock %}

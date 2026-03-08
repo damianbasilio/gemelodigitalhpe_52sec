@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Centro de Comando - Gemelo Digital</title>
+    
+    <!-- Estilos -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=5">
+    
+    <style>
+        /* Centro de Comando - Estilos consistentes con Simulador */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Sora', system-ui, sans-serif;
+            background: var(--bg-base);
+            color: var(--text-primary);
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        body::before, body::after { display: none; }
+
+        .command-center {
+            display: grid;
+            grid-template-columns: 300px 1fr 360px;
+            grid-template-rows: 56px 1fr;
+            height: 100vh;
+            gap: 1px;
+            background: var(--border);
+        }
+
+        /* Encabezado */
+        .cc-header {
+            grid-column: 1 / -1;
+            background: var(--bg-surface);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .cc-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .cc-title h1 {
+            font-size: 1rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+            color: var(--text-primary);
+        }
+
+        .cc-title .badge {
+            background: var(--accent-ghost);
+            color: var(--accent);
+            border: 1px solid var(--accent-border);
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.65rem;
+            font-weight: 500;
+            font-family: 'DM Mono', monospace;
+            letter-spacing: 0.04em;
+        }
+
+        .cc-stats {
+            display: flex;
+            gap: 32px;
+        }
+
+        .cc-stat {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .cc-stat .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .cc-stat .dot.green { background: var(--accent); }
+        .cc-stat .dot.yellow { background: var(--warn); }
+        .cc-stat .dot.red { background: var(--danger); }
+
+        .cc-stat .value {
+            font-size: 1.25rem;
+            font-weight: 600;
+            font-family: 'DM Mono', monospace;
+        }
+
+        .cc-stat .label {
+            font-size: 0.72rem;
+            color: var(--text-secondary);
+        }
+
+        .cc-user {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .cc-user-name {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        .cc-logout {
+            color: var(--accent);
+            font-size: 0.8rem;
+            text-decoration: none;
+            transition: opacity 0.2s;
+        }
+
+        .cc-logout:hover { opacity: 0.7; }
+
+        /* Barra lateral */
+        .cc-sidebar {
+            background: var(--bg-surface);
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .cc-sidebar h2 {
+            font-size: 0.7rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+        }
+
+        .vehicle-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .vehicle-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid var(--border);
+        }
+
+        .vehicle-card:hover {
+            border-color: var(--accent-border);
+        }
+
+        .vehicle-card.selected {
+            border-color: var(--accent);
+            background: var(--accent-ghost);
+        }
+
+        .vehicle-card .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .vehicle-card .operador {
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+        }
+
+        .vehicle-card .status {
+            font-size: 0.65rem;
+            padding: 3px 8px;
+            border-radius: 9999px;
+            font-weight: 500;
+            font-family: 'DM Mono', monospace;
+            letter-spacing: 0.02em;
+        }
+
+        /* Patrulla - azul (estado base) */
+        .vehicle-card .status.patrulla { 
+            background: var(--blue-ghost); 
+            color: var(--blue); 
+            border: 1px solid var(--blue-border);
+        }
+        
+        /* Persecucion - rojo pulsante */
+        .vehicle-card .status.persecucion { 
+            background: var(--danger-ghost); 
+            color: var(--danger); 
+            border: 1px solid rgba(239,68,68,0.3);
+            animation: pulse-status 1s ease-in-out infinite;
+        }
+        
+        /* Escolta - morado */
+        .vehicle-card .status.escolta { 
+            background: var(--purple-ghost); 
+            color: var(--purple); 
+            border: 1px solid rgba(168,85,247,0.3);
+        }
+        
+        /* Emergencia - rojo intenso pulsante */
+        .vehicle-card .status.emergencia { 
+            background: var(--danger-ghost); 
+            color: var(--danger); 
+            border: 1px solid rgba(239,68,68,0.4);
+            animation: pulse-status 0.8s ease-in-out infinite;
+        }
+        
+        /* Vigilancia - verde */
+        .vehicle-card .status.vigilancia { 
+            background: var(--accent-ghost); 
+            color: var(--accent); 
+            border: 1px solid var(--accent-border);
+        }
+        
+        /* Rescate - amarillo pulsante */
+        .vehicle-card .status.rescate { 
+            background: var(--warn-ghost); 
+            color: var(--warn); 
+            border: 1px solid rgba(245,158,11,0.3);
+            animation: pulse-status 1s ease-in-out infinite;
+        }
+        
+        /* Busqueda - amarillo */
+        .vehicle-card .status.busqueda { 
+            background: var(--warn-ghost); 
+            color: var(--warn); 
+            border: 1px solid rgba(245,158,11,0.3);
+        }
+        
+        /* Traslado - info/azul claro */
+        .vehicle-card .status.traslado { 
+            background: var(--info-ghost); 
+            color: var(--info); 
+            border: 1px solid rgba(91,141,255,0.3);
+        }
+        
+        /* Estilo por defecto para tipos no reconocidos - amarillo (indica escenario activo) */
+        .vehicle-card .status:not(.patrulla):not(.persecucion):not(.escolta):not(.emergencia):not(.vigilancia):not(.rescate):not(.busqueda):not(.traslado) { 
+            background: var(--warn-ghost); 
+            color: var(--warn); 
+            border: 1px solid rgba(245,158,11,0.3);
+        }
+        
+        @keyframes pulse-status {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .vehicle-card .info {
+            display: flex;
+            gap: 16px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .vehicle-card .info span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* Mapa */
+        .cc-map-container {
+            position: relative;
+            background: var(--bg-base);
+        }
+
+        #mapa-comando {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Marcador de vehículo - igual que simulador */
+        .leaflet-marker-icon {
+            transition: transform 0.15s linear !important;
+        }
+
+        .punto-vehiculo-comando {
+            position: relative;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .punto-interior-comando {
+            width: 14px;
+            height: 14px;
+            background: #2563eb;
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+            transition: transform 0.2s;
+        }
+
+        /* Escenario activo - rojo pulsante */
+        .punto-interior-comando.activo {
+            background: var(--danger);
+            animation: pulse-comando 1s infinite;
+        }
+
+        @keyframes pulse-comando {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+
+        .marker-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-card);
+            color: var(--text-primary);
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 500;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            border: 1px solid var(--border);
+            margin-bottom: 4px;
+        }
+
+        .punto-vehiculo-comando:hover .marker-tooltip {
+            opacity: 1;
+        }
+
+        /* Panel de detalles */
+        .cc-details {
+            background: var(--bg-surface);
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 24px;
+        }
+
+        .detail-section h3 {
+            font-size: 0.7rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-muted);
+            margin-bottom: 14px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            font-size: 0.8rem;
+        }
+
+        .detail-row .label { color: var(--text-secondary); }
+        .detail-row .value { font-weight: 500; font-family: 'DM Mono', monospace; }
+
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .telemetry-item {
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            border: 1px solid var(--border);
+        }
+
+        .telemetry-item .value {
+            font-size: 1.3rem;
+            font-weight: 600;
+            font-family: 'DM Mono', monospace;
+            margin-bottom: 4px;
+        }
+
+        .telemetry-item .label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
+
+        .telemetry-item.warning .value { color: var(--warn); }
+        .telemetry-item.danger .value { color: var(--danger); }
+
+        /* Sin selección */
+        .no-selection {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 40px;
+        }
+
+        .no-selection svg {
+            width: 40px;
+            height: 40px;
+            margin-bottom: 14px;
+            opacity: 0.4;
+        }
+
+        .no-vehicles {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <div class="command-center">
+        <!-- Encabezado -->
+        <header class="cc-header">
+            <div class="cc-title">
+                <h1>Centro de Comando</h1>
+                <span class="badge">DESPACHADOR</span>
+            </div>
+            <div class="cc-stats">
+                <div class="cc-stat">
+                    <div class="dot green"></div>
+                    <div>
+                        <div class="value" id="stat-activos">0</div>
+                        <div class="label">Activos</div>
+                    </div>
+                </div>
+                <div class="cc-stat">
+                    <div class="dot yellow"></div>
+                    <div>
+                        <div class="value" id="stat-escenarios">0</div>
+                        <div class="label">En Escenario</div>
+                    </div>
+                </div>
+                <div class="cc-stat">
+                    <div class="dot red"></div>
+                    <div>
+                        <div class="value" id="stat-alertas">0</div>
+                        <div class="label">Alertas</div>
+                    </div>
+                </div>
+            </div>
+            <div class="cc-user">
+                <div id="connection-dot" class="connection-dot disconnected" style="width:8px;height:8px;" title="Desconectado"></div>
+                <div style="display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;">
+                    <span style="font-family:var(--font-mono);font-size:0.76rem;color:var(--text-primary);letter-spacing:0.02em;">{{ usuario.get('nombre', 'Despachador') }}</span>
+                    <span class="badge badge-muted" style="font-size:0.6rem;padding:1px 8px;">{{ usuario.get('rol', 'despachador') }}</span>
+                </div>
+                <a href="{{ url_for('logout') }}" class="btn btn-ghost" style="font-size:0.78rem;padding:5px 14px;">Salir</a>
+            </div>
+        </header>
+
+        <!-- Barra lateral -->
+        <aside class="cc-sidebar">
+            <h2>Unidades Conectadas</h2>
+            <div class="vehicle-list" id="vehicle-list">
+                <div class="no-vehicles"><p>Esperando conexiones...</p></div>
+            </div>
+        </aside>
+
+        <!-- Mapa -->
+        <main class="cc-map-container">
+            <div id="mapa-comando"></div>
+        </main>
+
+        <!-- Detalles -->
+        <aside class="cc-details">
+            <div id="details-content">
+                <div class="no-selection">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/>
+                        <path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/>
+                    </svg>
+                    <p>Selecciona una unidad<br>para ver sus detalles</p>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Dependencias -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    
+    <script>
+        const CONFIGURACION = { CENTRO_MADRID: [40.4168, -3.7038] };
+
+        const estado = {
+            vehiculos: new Map(),
+            vehiculoSeleccionado: null,
+            marcadores: new Map(),
+            capaRastro: null,
+            segmentosRastro: [],
+            capaRuta: null,
+            socket: null,
+            mapa: null,
+            conectado: false
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            inicializarMapa();
+            inicializarSocket();
+        });
+
+        function inicializarMapa() {
+            estado.mapa = L.map('mapa-comando', {
+                zoomControl: true,
+                attributionControl: false
+            }).setView(CONFIGURACION.CENTRO_MADRID, 13);
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                maxZoom: 19
+            }).addTo(estado.mapa);
+        }
+
+        function inicializarSocket() {
+            estado.socket = io({ transports: ['websocket', 'polling'] });
+
+            estado.socket.on('connect', () => {
+                console.log('[WS] Conectado');
+                actualizarEstadoConexion(true);
+                estado.socket.emit('solicitar_todos_vehiculos');
+            });
+
+            estado.socket.on('disconnect', () => {
+                console.log('[WS] Desconectado');
+                actualizarEstadoConexion(false);
+            });
+
+            estado.socket.on('todos_vehiculos', (data) => {
+                data.vehiculos.forEach(v => {
+                    estado.vehiculos.set(v.vehiculo_id, v);
+                    actualizarMarcador(v);
+                });
+                renderizarListaVehiculos();
+                actualizarEstadisticas();
+            });
+
+            estado.socket.on('actualizacion_vehiculo', (data) => {
+                const existente = estado.vehiculos.get(data.vehiculo_id) || {};
+                const actualizado = { ...existente, ...data };
+                estado.vehiculos.set(data.vehiculo_id, actualizado);
+                actualizarMarcador(actualizado);
+                
+                if (estado.vehiculoSeleccionado === data.vehiculo_id) {
+                    renderizarDetallesVehiculo(actualizado);
+                    actualizarRastroYRuta(actualizado);
+                }
+                
+                renderizarListaVehiculos();
+                actualizarEstadisticas();
+            });
+
+            estado.socket.on('vehiculo_desconectado', (data) => {
+                const id = data.vehiculo_id;
+                estado.vehiculos.delete(id);
+                
+                if (estado.marcadores.has(id)) {
+                    estado.mapa.removeLayer(estado.marcadores.get(id));
+                    estado.marcadores.delete(id);
+                }
+                
+                if (estado.vehiculoSeleccionado === id) {
+                    estado.vehiculoSeleccionado = null;
+                    limpiarRastroYRuta();
+                    document.getElementById('details-content').innerHTML = `
+                        <div class="no-selection">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                <path d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/>
+                            </svg>
+                            <p>Unidad desconectada</p>
+                        </div>
+                    `;
+                }
+                
+                renderizarListaVehiculos();
+                actualizarEstadisticas();
+            });
+        }
+
+        function actualizarEstadoConexion(conectado) {
+            estado.conectado = conectado;
+            const indicador = document.getElementById('connection-dot');
+            if (!indicador) return;
+            
+            indicador.classList.remove('connected', 'disconnected');
+            
+            if (conectado) {
+                indicador.classList.add('connected');
+                indicador.title = 'Conectado';
+            } else {
+                indicador.classList.add('disconnected');
+                indicador.title = 'Desconectado';
+            }
+        }
+
+        function actualizarMarcador(v) {
+            const id = v.vehiculo_id;
+            const pos = v.posicion;
+            
+            if (!pos || !pos.lat || !pos.lon) return;
+
+            const escenario = v.escenario || 'patrulla';
+            const nombre = v.operador || v.usuario || 'Unidad';
+            
+            if (estado.marcadores.has(id)) {
+                const marcador = estado.marcadores.get(id);
+                const posActual = marcador.getLatLng();
+                const posNueva = L.latLng(pos.lat, pos.lon);
+                
+                if (posActual.distanceTo(posNueva) > 0.5) {
+                    marcador.setLatLng(posNueva);
+                }
+                
+                // Actualizar icono si cambio el escenario
+                const iconEl = marcador.getElement();
+                if (iconEl) {
+                    const punto = iconEl.querySelector('.punto-interior-comando');
+                    if (punto) {
+                        // Escenario activo = rojo, patrulla = azul
+                        const claseActivo = (escenario && escenario !== 'patrulla') ? 'activo' : '';
+                        punto.className = `punto-interior-comando ${claseActivo}`;
+                    }
+                }
+            } else {
+                const claseActivo = (escenario && escenario !== 'patrulla') ? 'activo' : '';
+                const icon = L.divIcon({
+                    className: 'icono-vehiculo-punto',
+                    html: `<div class="punto-vehiculo-comando">
+                        <div class="punto-interior-comando ${claseActivo}"></div>
+                        <div class="marker-tooltip">${nombre}</div>
+                    </div>`,
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 12]
+                });
+
+                const marcador = L.marker([pos.lat, pos.lon], { icon })
+                    .addTo(estado.mapa)
+                    .on('click', () => seleccionarVehiculo(id));
+
+                estado.marcadores.set(id, marcador);
+            }
+        }
+
+        function obtenerColorRastro(escenario) {
+            // Escenario activo = rojo, patrulla = azul
+            if (escenario && escenario !== 'patrulla') {
+                return '#f87171';
+            }
+            return '#60a5fa';
+        }
+
+        function actualizarRastroYRuta(v) {
+            // Dibujar rastro (recorrido) - color segun escenario
+            const escenario = v.escenario || 'patrulla';
+            const colorRastro = obtenerColorRastro(escenario);
+            
+            if (v.rastro && v.rastro.length > 1) {
+                const coordsRastro = v.rastro.map(p => [p[0], p[1]]);
+                
+                // Limpiar segmentos anteriores si existen
+                if (estado.segmentosRastro && estado.segmentosRastro.length > 0) {
+                    estado.segmentosRastro.forEach(seg => estado.mapa.removeLayer(seg));
+                    estado.segmentosRastro = [];
+                }
+                
+                // Si ya existe el rastro, actualizar puntos y color
+                if (estado.capaRastro) {
+                    estado.capaRastro.setLatLngs(coordsRastro);
+                    estado.capaRastro.setStyle({ color: colorRastro });
+                } else {
+                    // Crear nuevo rastro
+                    estado.capaRastro = L.polyline(coordsRastro, {
+                        color: colorRastro,
+                        weight: 3,
+                        opacity: 0.7,
+                        lineCap: 'round',
+                        lineJoin: 'round',
+                        smoothFactor: 1.5
+                    }).addTo(estado.mapa);
+                }
+            } else {
+                // No hay rastro, limpiar
+                if (estado.capaRastro) {
+                    estado.mapa.removeLayer(estado.capaRastro);
+                    estado.capaRastro = null;
+                }
+                if (estado.segmentosRastro && estado.segmentosRastro.length > 0) {
+                    estado.segmentosRastro.forEach(seg => estado.mapa.removeLayer(seg));
+                    estado.segmentosRastro = [];
+                }
+            }
+            
+            // Dibujar ruta restante SOLO si hay escenario activo (no patrulla)
+            if (escenario !== 'patrulla' && v.ruta && v.ruta.length > 1) {
+                const indice = v.indice_ruta || 0;
+                const rutaRestante = v.ruta.slice(indice);
+                if (rutaRestante.length > 1) {
+                    // Si ya existe la ruta, solo actualizar los puntos
+                    if (estado.capaRuta) {
+                        estado.capaRuta.setLatLngs(rutaRestante);
+                    } else {
+                        estado.capaRuta = L.polyline(rutaRestante, {
+                            color: '#00e5c4',
+                            weight: 2,
+                            opacity: 0.4,
+                            dashArray: '5, 10',
+                            smoothFactor: 1.5
+                        }).addTo(estado.mapa);
+                    }
+                } else {
+                    if (estado.capaRuta) {
+                        estado.mapa.removeLayer(estado.capaRuta);
+                        estado.capaRuta = null;
+                    }
+                }
+            } else {
+                if (estado.capaRuta) {
+                    estado.mapa.removeLayer(estado.capaRuta);
+                    estado.capaRuta = null;
+                }
+            }
+        }
+
+        function limpiarRastroYRuta() {
+            if (estado.capaRastro) {
+                estado.mapa.removeLayer(estado.capaRastro);
+                estado.capaRastro = null;
+            }
+            if (estado.segmentosRastro) {
+                estado.segmentosRastro.forEach(seg => estado.mapa.removeLayer(seg));
+                estado.segmentosRastro = [];
+            }
+            if (estado.capaRuta) {
+                estado.mapa.removeLayer(estado.capaRuta);
+                estado.capaRuta = null;
+            }
+        }
+
+        function renderizarListaVehiculos() {
+            const contenedor = document.getElementById('vehicle-list');
+            
+            if (estado.vehiculos.size === 0) {
+                contenedor.innerHTML = '<div class="no-vehicles"><p>Esperando conexiones...</p></div>';
+                return;
+            }
+
+            let html = '';
+            estado.vehiculos.forEach((v, id) => {
+                const escenario = v.escenario || 'patrulla';
+                const velocidad = v.velocidad?.toFixed(0) || 0;
+                const combustible = v.combustible?.toFixed(0) || v.estado?.combustible?.toFixed(0) || '--';
+                const seleccionado = estado.vehiculoSeleccionado === id ? 'selected' : '';
+                const nombre = v.operador || v.usuario || 'Unidad';
+
+                html += `
+                    <div class="vehicle-card ${seleccionado}" onclick="seleccionarVehiculo('${id}')">
+                        <div class="header">
+                            <span class="operador">${nombre}</span>
+                            <span class="status ${escenario}">${escenario.charAt(0).toUpperCase() + escenario.slice(1)}</span>
+                        </div>
+                        <div class="info">
+                            <span>${velocidad} km/h</span>
+                            <span>${combustible}%</span>
+                        </div>
+                    </div>
+                `;
+            });
+
+            contenedor.innerHTML = html;
+        }
+
+        function seleccionarVehiculo(id) {
+            // Si cambia de vehiculo, limpiar rastro/ruta anterior
+            if (estado.vehiculoSeleccionado !== id) {
+                limpiarRastroYRuta();
+            }
+            
+            estado.vehiculoSeleccionado = id;
+            renderizarListaVehiculos();
+            
+            const v = estado.vehiculos.get(id);
+            if (v) {
+                renderizarDetallesVehiculo(v);
+                actualizarRastroYRuta(v);
+                
+                if (v.posicion) {
+                    estado.mapa.setView([v.posicion.lat, v.posicion.lon], 15);
+                }
+            }
+        }
+
+        function renderizarDetallesVehiculo(v) {
+            const contenedor = document.getElementById('details-content');
+            const nombre = v.operador || v.usuario || 'Sin asignar';
+            const combustible = v.combustible || v.estado?.combustible;
+            const temperatura = v.temperatura || v.estado?.temperatura;
+            const kilometraje = v.kilometraje || v.estado?.kilometraje;
+            const desgasteFreno = v.desgaste_frenos || v.estado?.desgaste_frenos || 0;
+            const desgasteNeuma = v.desgaste_neumaticos || v.estado?.desgaste_neumaticos || 0;
+            const aceite = v.nivel_aceite || v.estado?.nivel_aceite;
+            
+            contenedor.innerHTML = `
+                <div class="detail-section">
+                    <h3>Información</h3>
+                    <div class="detail-row">
+                        <span class="label">Operador</span>
+                        <span class="value">${nombre}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Escenario</span>
+                        <span class="value">${v.escenario ? v.escenario.charAt(0).toUpperCase() + v.escenario.slice(1) : 'Patrulla'}</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Ubicación</span>
+                        <span class="value">${v.posicion?.lat?.toFixed(5) || '--'}, ${v.posicion?.lon?.toFixed(5) || '--'}</span>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h3>Telemetría</h3>
+                    <div class="telemetry-grid">
+                        <div class="telemetry-item">
+                            <div class="value">${v.velocidad?.toFixed(0) || 0}</div>
+                            <div class="label">km/h</div>
+                        </div>
+                        <div class="telemetry-item ${combustible < 20 ? 'warning' : ''}">
+                            <div class="value">${combustible?.toFixed(0) || '--'}%</div>
+                            <div class="label">Combustible</div>
+                        </div>
+                        <div class="telemetry-item ${temperatura > 100 ? 'danger' : ''}">
+                            <div class="value">${temperatura?.toFixed(0) || '--'}°</div>
+                            <div class="label">Temp. Motor</div>
+                        </div>
+                        <div class="telemetry-item">
+                            <div class="value">${kilometraje ? (kilometraje / 1000).toFixed(0) : '--'}k</div>
+                            <div class="label">Kilometraje</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="detail-section">
+                    <h3>Estado del Vehículo</h3>
+                    <div class="detail-row">
+                        <span class="label">Frenos</span>
+                        <span class="value" style="color: ${desgasteFreno > 70 ? 'var(--danger)' : 'inherit'}">
+                            ${(100 - desgasteFreno).toFixed(0)}%
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Neumáticos</span>
+                        <span class="value" style="color: ${desgasteNeuma > 70 ? 'var(--warn)' : 'inherit'}">
+                            ${(100 - desgasteNeuma).toFixed(0)}%
+                        </span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">Aceite</span>
+                        <span class="value">${aceite?.toFixed(0) || '--'}%</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function actualizarEstadisticas() {
+            const listaVehiculos = Array.from(estado.vehiculos.values());
+            
+            document.getElementById('stat-activos').textContent = listaVehiculos.length;
+            
+            const enEscenario = listaVehiculos.filter(v => v.escenario && v.escenario !== 'patrulla').length;
+            document.getElementById('stat-escenarios').textContent = enEscenario;
+            
+            const alertas = listaVehiculos.filter(v => {
+                const c = v.combustible || v.estado?.combustible || 100;
+                const t = v.temperatura || v.estado?.temperatura || 70;
+                return c < 15 || t > 105;
+            }).length;
+            document.getElementById('stat-alertas').textContent = alertas;
+        }
+
+        // Sondeo cada 1.5 segundos
+        setInterval(() => {
+            if (estado.conectado) {
+                estado.socket.emit('solicitar_todos_vehiculos');
+            }
+        }, 1500);
+    </script>
+</body>
+</html>
